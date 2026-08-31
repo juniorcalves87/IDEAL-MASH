@@ -1,0 +1,270 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import * as XLSX from 'xlsx';
+import { 
+  LayoutDashboard, ClipboardList, Database, AlertTriangle, 
+  Map as MapIcon, History, Settings, FileSpreadsheet, 
+  Search, Filter, ChevronRight, Activity, ShieldAlert, CheckCircle
+} from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { differenceInDays, format, isValid, parseISO } from 'date-fns';
+
+// --- LOGICA DE NEGÓCIO PCM V5 ---
+const processarCargaSAP = (iw38 = [], ip24 = [], baseAntiga = []) => {
+  const map = new Map(baseAntiga.map(o => [String(o.Ordem), o]));
+
+  // Processar IP24 (Dados de Plano e Localização)
+  ip24.forEach(row => {
+    const id = String(row.Ordem);
+    if (!id || id === 'undefined') return;
+    map.set(id, { ...map.get(id), ...row, hasIP24: true });
+  });
+
+  // Processar IW38 (Status e Datas de Referência)
+  iw38.forEach(row => {
+    const id = String(row.Ordem);
+    if (!id || id === 'undefined') return;
+
+    const existing = map.get(id) || {};
+    
+    // Status Gerencial
+    const statusSap = row['Status sistema'] || '';
+    let statusGer = 'OUTRO';
+    if (statusSap.includes('ENTE')) statusGer = 'ENCERRADA';
+    else if (statusSap.includes('ABER')) statusGer = 'ABERTA';
+    else if (statusSap.includes('LIB')) statusGer = 'LIBERADA';
+    else if (statusSap.includes('CONF')) statusGer = 'EM EXECUÇÃO';
+
+    // Vencimento Gerencial (Regra V5: IP24 > IW38)
+    const dtVenc = existing['Data encerramento'] || row['Dt.referência'];
+    
+    // Aging e Prioridade
+    let atraso = 0;
+    let aging = 'NO ATRASO';
+    let prioridade = 'NORMAL';
+
+    if (dtVenc && statusGer !== 'ENCERRADA') {
+      const dataFim = new Date(dtVenc);
+      if (isValid(dataFim)) {
+        atraso = differenceInDays(new Date(), dataFim);
+        if (atraso < 0) atraso = 0;
+        if (atraso > 60) aging = '>60';
+        else if (atraso > 30) aging = '31–60';
+        else if (atraso > 7) aging = '8–30';
+        else if (atraso > 0) aging = '1–7';
+
+        if (atraso > 30) prioridade = 'CRÍTICA';
+        else if (atraso > 7) prioridade = 'ALTA';
+        else if (atraso > 0) prioridade = 'MÉDIA';
+      }
+    }
+
+    map.set(id, {
+      ...existing,
+      ...row,
+      Ordem: id,
+      StatusGerencial: statusGer,
+      VencimentoGerencial: dtVenc,
+      DiasAtraso: atraso,
+      Aging: aging,
+      Prioridade: prioridade,
+      Bloqueada: statusSap.includes('BLOQ'),
+      UltimaCarga: new Date().toISOString()
+    });
+  });
+
+  return Array.from(map.values());
+};
+
+// --- COMPONENTES DE INTERFACE ---
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [orders, setOrders] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // KPIs
+  const stats = useMemo(() => {
+    const abertas = orders.filter(o => o.StatusGerencial !== 'ENCERRADA');
+    return {
+      total: orders.length,
+      abertas: abertas.length,
+      atrasadas: abertas.filter(o => o.DiasAtraso > 0).length,
+      criticas: abertas.filter(o => o.Prioridade === 'CRÍTICA').length,
+      cobertura: orders.length > 0 ? ((orders.filter(o => o.hasIP24).length / orders.length) * 100).toFixed(1) : 0
+    };
+  }, [orders]);
+
+  const handleFileUpload = (e, type) => {
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const wb = XLSX.read(evt.target.result, { type: 'binary' });
+      const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      
+      const updated = type === 'IW38' 
+        ? processarCargaSAP(data, [], orders) 
+        : processarCargaSAP([], data, orders);
+      
+      setOrders(updated);
+      alert(`Sucesso: ${type} processada.`);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  return (
+    <div className="flex h-screen bg-[#0d1117] text-gray-200 overflow-hidden font-sans">
+      {/* Sidebar - Responsiva */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#161b22] border-r border-gray-800 transition-transform lg:relative lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-6">
+          <h1 className="text-yellow-500 font-black text-2xl tracking-tighter italic">PCM TORRE V5</h1>
+          <p className="text-[10px] text-gray-500 uppercase tracking-[0.2em]">Centro de Controle PM</p>
+        </div>
+        <nav className="mt-4 px-4 space-y-1">
+          <MenuBtn icon={<LayoutDashboard size={20}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+          <MenuBtn icon={<ClipboardList size={20}/>} label="Ordens (IW38)" active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} />
+          <MenuBtn icon={<Database size={20}/>} label="Importar SAP" active={activeTab === 'import'} onClick={() => setActiveTab('import')} />
+          <MenuBtn icon={<Activity size={20}/>} label="Diagnóstico" active={activeTab === 'diag'} onClick={() => setActiveTab('diag')} />
+        </nav>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <header className="h-16 bg-[#161b22] border-b border-gray-800 flex items-center justify-between px-4 lg:px-8">
+          <button className="lg:hidden p-2" onClick={() => setSidebarOpen(!sidebarOpen)}>
+             <Activity className="text-yellow-500" />
+          </button>
+          <div className="flex gap-4">
+             <div className="text-xs text-right hidden sm:block">
+                <p className="text-gray-500 uppercase font-bold text-[9px]">Status do Sistema</p>
+                <p className="text-green-400 font-mono">● OPERACIONAL</p>
+             </div>
+          </div>
+        </header>
+
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 space-y-6">
+          
+          {/* Dashboard View */}
+          {activeTab === 'dashboard' && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <KPICard label="Total de Ordens" value={stats.total} />
+                <KPICard label="Ordens Abertas" value={stats.abertas} color="text-blue-400" />
+                <KPICard label="Atrasadas" value={stats.atrasadas} color="text-yellow-500" />
+                <KPICard label="Críticas (>30d)" value={stats.criticas} color="text-red-500" />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80">
+                <div className="bg-[#161b22] p-6 rounded-xl border border-gray-800">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase mb-4">Qualidade da Carga (Cobertura IP24)</h3>
+                  <div className="flex items-center justify-center h-full flex-col">
+                    <span className="text-5xl font-black text-yellow-500">{stats.cobertura}%</span>
+                    <p className="text-xs text-gray-500 mt-2">Das ordens IW38 possuem plano IP24 correspondente</p>
+                  </div>
+                </div>
+                <div className="bg-[#161b22] p-6 rounded-xl border border-gray-800">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase mb-4">Alertas Críticos</h3>
+                  <div className="space-y-3 overflow-y-auto">
+                    {orders.filter(o => o.Prioridade === 'CRÍTICA').slice(0, 5).map(o => (
+                      <div key={o.Ordem} className="flex items-center gap-3 p-2 bg-red-900/10 border-l-2 border-red-500 text-[11px]">
+                        <AlertTriangle size={14} className="text-red-500" />
+                        <span>Ordem <strong>{o.Ordem}</strong> com {o.DiasAtraso} dias de atraso.</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Table View */}
+          {activeTab === 'orders' && (
+            <div className="bg-[#161b22] rounded-xl border border-gray-800 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px] min-w-[1000px]">
+                  <thead>
+                    <tr className="bg-black/20 text-gray-500 font-mono uppercase">
+                      <th className="p-4 border-b border-gray-800">Ordem</th>
+                      <th className="p-4 border-b border-gray-800 text-blue-400">Status Gerencial</th>
+                      <th className="p-4 border-b border-gray-800">Texto Breve</th>
+                      <th className="p-4 border-b border-gray-800">Vencimento</th>
+                      <th className="p-4 border-b border-gray-800">Aging</th>
+                      <th className="p-4 border-b border-gray-800">Local Inst.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.map(o => (
+                      <tr key={o.Ordem} className="hover:bg-gray-800/40 border-b border-gray-800/50 transition-colors">
+                        <td className="p-4 font-bold text-yellow-500 font-mono">{o.Ordem}</td>
+                        <td className="p-4">
+                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${o.StatusGerencial === 'ENCERRADA' ? 'bg-green-900/30 text-green-400' : 'bg-blue-900/30 text-blue-400'}`}>
+                             {o.StatusGerencial}
+                           </span>
+                        </td>
+                        <td className="p-4 text-gray-400 max-w-xs truncate">{o['Texto breve']}</td>
+                        <td className="p-4 font-mono">{o.VencimentoGerencial}</td>
+                        <td className={`p-4 font-bold ${o.Prioridade === 'CRÍTICA' ? 'text-red-500' : 'text-gray-500'}`}>{o.Aging}</td>
+                        <td className="p-4 text-[10px] text-gray-500">{o['Loc.instalação'] || 'S/ LOCAL'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Import View */}
+          {activeTab === 'import' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl">
+               <div className="bg-[#161b22] p-8 rounded-2xl border border-dashed border-gray-700 text-center">
+                  <FileSpreadsheet className="mx-auto mb-4 text-blue-500" size={48} />
+                  <h3 className="font-bold mb-2">FONTE IW38</h3>
+                  <input type="file" onChange={(e) => handleFileUpload(e, 'IW38')} className="text-xs text-gray-500" />
+               </div>
+               <div className="bg-[#161b22] p-8 rounded-2xl border border-dashed border-gray-700 text-center">
+                  <FileSpreadsheet className="mx-auto mb-4 text-yellow-500" size={48} />
+                  <h3 className="font-bold mb-2">FONTE IP24</h3>
+                  <input type="file" onChange={(e) => handleFileUpload(e, 'IP24')} className="text-xs text-gray-500" />
+               </div>
+            </div>
+          )}
+
+          {/* Diagnosis View */}
+          {activeTab === 'diag' && (
+            <div className="space-y-6">
+              <div className="bg-[#161b22] p-6 rounded-xl border border-gray-800">
+                <h3 className="font-bold mb-4 flex items-center gap-2"><ShieldAlert className="text-yellow-500"/> Diagnóstico de Qualidade</h3>
+                <ul className="space-y-4">
+                  <DiagItem label="Ordens sem correspondência IP24" value={orders.filter(o => !o.hasIP24).length} type="warning" />
+                  <DiagItem label="Ordens Bloqueadas no SAP" value={orders.filter(o => o.Bloqueada).length} type="danger" />
+                  <DiagItem label="Ordens com Datas de Vencimento Vazias" value={orders.filter(o => !o.VencimentoGerencial).length} type="danger" />
+                </ul>
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// --- SUBCOMPONENTES ---
+
+const MenuBtn = ({ icon, label, active, onClick }) => (
+  <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-yellow-500 text-black font-bold shadow-lg shadow-yellow-500/10' : 'text-gray-400 hover:bg-gray-800'}`}>
+    {icon} <span className="text-sm">{label}</span>
+  </button>
+);
+
+const KPICard = ({ label, value, color = "text-white" }) => (
+  <div className="bg-[#161b22] p-5 rounded-2xl border border-gray-800">
+    <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">{label}</p>
+    <p className={`text-3xl font-black mt-1 font-mono ${color}`}>{value}</p>
+  </div>
+);
+
+const DiagItem = ({ label, value, type }) => (
+  <li className="flex justify-between items-center p-3 bg-black/20 rounded-lg">
+    <span className="text-xs text-gray-400">{label}</span>
+    <span className={`font-mono font-bold ${type === 'danger' ? 'text-red-500' : 'text-yellow-500'}`}>{value}</span>
+  </li>
+);
