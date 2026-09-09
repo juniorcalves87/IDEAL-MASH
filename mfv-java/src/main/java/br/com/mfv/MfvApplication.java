@@ -1,5 +1,6 @@
 package br.com.mfv;
 
+import br.com.mfv.pcm.AnnualMapService;
 import org.apache.poi.ss.usermodel.*;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -15,7 +16,11 @@ public class MfvApplication {
   @RestController
   @RequestMapping("/api")
   static class Api {
+    private final AnnualMapService annualMapService;
+    Api(AnnualMapService annualMapService) { this.annualMapService = annualMapService; }
+
     @GetMapping("/health") Map<String,Object> health(){ return Map.of("status","UP","app","MFV Java"); }
+
     @GetMapping("/base") Map<String,Object> base() throws Exception {
       Path file=Paths.get("data/REFRIGERACAO.xlsx");
       if(!Files.exists(file)) return Map.of("status","BASE_NAO_ENCONTRADA");
@@ -25,6 +30,12 @@ public class MfvApplication {
         return Map.of("status","OK","arquivo",file.toString(),"abas",rows.size(),"registros",rows,"versao","BASE V1.0 — REAL PCM · PRODUÇÃO");
       }
     }
+
+    @GetMapping("/pcm/mapa-52-semanas")
+    Map<String,Object> mapa52(@RequestParam(defaultValue="2026") int year) {
+      return annualMapService.build(year);
+    }
+
     @PostMapping("/base/import") Map<String,Object> importBase(@RequestParam("file") org.springframework.web.multipart.MultipartFile file) throws Exception {
       Files.createDirectories(Paths.get("data")); Path target=Paths.get("data/REFRIGERACAO.xlsx"); file.transferTo(target); return base();
     }
