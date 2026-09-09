@@ -2,65 +2,55 @@
 
 Projeto Java 21 + Spring Boot + Maven, separado do frontend original e preparado para compilação externa.
 
-## Fonte de dados
-A aplicação usa o arquivo real `data/REFRIGERACAO.xlsx` quando ele estiver disponível no ambiente de execução. O workbook contém as 12 abas: MODELO, DASH, Programação, IP24, IW38, Planos ativos, Tolerância, Turnos, PMOC BASE, Local, EXCLUSÃO e Planilha8.
+## Fase 2 entregue
+- Persistência JPA/H2 das linhas das 12 abas.
+- Versionamento das importações.
+- Importação XLSX transacional.
+- Resumo persistente da base.
+- Reconciliação IW38 x IP24 por chave comum detectada.
+- Mapa anual S01–S52 e regras de programação.
+- Testes JUnit.
+- GitHub Actions para `mvn clean verify`.
+- Dockerfile e docker-compose para execução externa.
 
-A API também permite importar/atualizar a base em runtime por `POST /api/base/import` com multipart `file`.
+## Fonte real
+`REFRIGERACAO.xlsx` deve ser fornecida em `data/` para execução local ou enviada por `POST /api/base/import` com multipart `file`. Não são usados KPIs fictícios.
 
-## Mapa de 52 semanas / PCM Engine
-O `RealPcmEngineService` lê a programação real do workbook para o ano solicitado, remove planos presentes em `EXCLUSÃO`, classifica as atividades e consolida S01–S52. Se a aba `Programação` não produzir ocorrências para o ano, o motor usa `IP24 + Planos ativos` como fallback para gerar ocorrências pelas periodicidades suportadas.
-
+## Regras PCM
 Periodicidades: `1S`, `2S`, `5S`, `13S`, `26S`, `1A`.
-
-Regras incorporadas ao domínio:
 - AMV 01–04 → segunda-feira;
 - AMV 05–08 → terça-feira;
 - AMV 09/10/11/13 → quarta-feira;
 - Trechos/Lastros/IC → quinta/sexta;
 - capacidade normal de 4 ordens/dia;
-- exceção até 6 para 2S/5S;
-- planos excluídos não entram no mapa.
+- exceção até 6 para 2S/5S quando permitida;
+- planos excluídos não entram no planejamento.
 
-Categorias do Master Plan:
-PM, PdM, Inspeção, Corretiva Planejada, Shutdown, Projeto/CAPEX, Terceiros, Materiais, Mão de Obra, Treinamento e Compliance.
-
-### Endpoints
+## APIs
 - `GET /api/health`
 - `GET /api/base`
 - `POST /api/base/import`
 - `GET /api/pcm/mapa-52-semanas?year=2026`
-- `GET /api/pcm/diagnostico`
+- `GET /api/sap/reconciliacao`
 
-O retorno do mapa informa por semana: ordens, categorias, pico diário, capacidade normal/excepcional, conflitos de capacidade e conflitos com as regras de dia.
-
-**HH:** a base real atual possui a coluna `Tempo` em `Planos ativos`, porém seus valores observados são descrições de frequência (por exemplo, SEMANAL/MENSAL/SEMESTRAL), não duração em horas. Por isso o motor não inventa HH; `plannedHH`, `availableHH` e ocupação ficam sem valor até existir uma fonte confiável de duração/capacidade.
-
-## Executar
-Requisitos: JDK 21+ e Maven 3.9+.
-
+## Compilar e testar
 ```bash
 cd mfv-java
-mvn clean test package
-java -jar target/mfv-java-1.0.0.jar
+mvn -B clean verify
 ```
 
-A aplicação inicia na porta `8080`.
+## Executar
+```bash
+mvn spring-boot:run
+```
 
-## Testes
-Os testes de domínio validam as regras AMV, Trechos/Lastros/IC, capacidade diária e exceções.
+## Docker
+```bash
+mvn clean package
+docker build -t mfv-java:1.1.0 .
+docker run --rm -p 8080:8080 mfv-java:1.1.0
+```
 
-## Próximas fases
-- persistência e versionamento das 12 abas;
-- entidades JPA e PostgreSQL;
-- tolerância calculada por ciclo;
-- SAP IW38 x IP24;
-- PMOC x ativos x planos x locais;
-- dashboard executivo real;
-- programação diária/semanal/mensal/trimestral/anual;
-- campo, QR, checklist, fotos, assinatura e PDF;
-- MANU IA server-side;
-- RBAC, auditoria e segurança;
-- PWA/offline/sincronização;
-- Docker e deploy.
+A planilha real atual não fornece duração HH confiável; portanto o sistema não inventa HH nem ocupação. Esses indicadores só devem ser calculados quando houver fonte de duração/capacidade válida.
 
-Nunca colocar chaves de IA no código-fonte. Usar variáveis de ambiente/secrets no servidor.
+Nunca armazenar chaves de IA no repositório. Use secrets/variáveis de ambiente no servidor.
