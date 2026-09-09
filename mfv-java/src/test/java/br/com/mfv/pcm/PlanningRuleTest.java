@@ -2,6 +2,7 @@ package br.com.mfv.pcm;
 
 import org.junit.jupiter.api.Test;
 import java.time.DayOfWeek;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
