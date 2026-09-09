@@ -1,0 +1,27 @@
+name: MFV Java Build
+on:
+  push:
+    paths: ['mfv-java/**']
+  pull_request:
+    paths: ['mfv-java/**']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mfv-java
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Test and package
+        run: mvn -B clean verify
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfv-java-jar
+          path: mfv-java/target/*.jar
+          if-no-files-found: error
