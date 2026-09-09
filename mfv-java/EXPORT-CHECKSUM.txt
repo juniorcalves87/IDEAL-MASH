@@ -1,0 +1,4 @@
+Pacote: MFV Java Fase 2
+Branch: mfv-java
+Ultimo commit: 1ad6b91aba004323dae169780cefbe0da112ce9a
+Build: mvn -B clean verify
