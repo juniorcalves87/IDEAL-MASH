@@ -1,0 +1,11 @@
+services:
+  mfv-java:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/data/mfvdb;AUTO_SERVER=TRUE
+    volumes:
+      - mfv-data:/data
+volumes:
+  mfv-data:
