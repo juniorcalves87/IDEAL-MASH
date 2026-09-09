@@ -1,0 +1,26 @@
+MFV JAVA - EXPORTACAO PARA TESTE EXTERNO
+
+Branch: mfv-java
+Projeto: mfv-java
+Java: 21
+Maven: 3.9+
+
+COMANDOS:
+1) cd mfv-java
+2) mvn -B clean verify
+3) mvn spring-boot:run
+
+API:
+GET http://localhost:8080/api/health
+GET http://localhost:8080/api/base
+GET http://localhost:8080/api/pcm/mapa-52-semanas?year=2026
+GET http://localhost:8080/api/sap/reconciliacao
+POST http://localhost:8080/api/base/import (multipart file)
+
+BASE REAL:
+Copiar REFRIGERACAO.xlsx para mfv-java/data/ ou importar pela API.
+
+DOCKER:
+mvn clean package
+docker build -t mfv-java:1.1.0 .
+docker run --rm -p 8080:8080 mfv-java:1.1.0
